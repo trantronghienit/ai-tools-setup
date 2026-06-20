@@ -26,84 +26,93 @@ tools container → 127.0.0.1:7456 (loopback, không cần token)
 
 ---
 
-## 2. Clone dự án
+## 2. Clone dự án + copy file backup
 
 ```bash
-git clone <repo-url> open-design
+# Bước 1: Clone repo gốc
+git clone https://github.com/nexu-io/open-design.git
 cd open-design/deploy
+
+# Bước 2: Copy các file tùy chỉnh từ bản backup vào đây
+# (docker-compose.yml, Dockerfile.daemon, Dockerfile.proxy,
+#  Dockerfile.tools, proxy/proxy.mjs, setup.ps1, setup.sh)
+
+# Bước 3: Chạy script setup (tự động làm các bước còn lại)
+# Windows:
+.\setup.ps1
+
+# Linux/macOS:
+chmod +x setup.sh && ./setup.sh
 ```
 
-Các file quan trọng trong thư mục `deploy/`:
+### Giải thích
 
-| File | Chức năng |
+Repo gốc chỉ chứa `Dockerfile` (build từ source) và `docker-compose.yml` cơ bản. Các file chúng ta thêm/sửa để có proxy + opencode + tools container là:
+
+| File | Nguồn gốc |
 |------|-----------|
-| `docker-compose.yml` | Định nghĩa 3 service |
-| `Dockerfile.daemon` | Mở rộng image published, cài opencode |
-| `Dockerfile.proxy` | Proxy thêm Bearer token |
-| `Dockerfile.tools` | Image chứa od CLI + opencode |
-| `proxy/proxy.mjs` | Mã nguồn proxy |
-| `.env` | Biến môi trường (OD_API_TOKEN, ...) |
+| `docker-compose.yml` | **Sửa** từ bản gốc: thêm proxy service, bỏ ports của daemon, thêm tmpfs + HOME |
+| `Dockerfile.daemon` | **Tạo mới**: kế thừa published image, copy opencode binary từ tools image |
+| `Dockerfile.proxy` | **Tạo mới**: Node.js reverse proxy thêm Bearer token |
+| `Dockerfile.tools` | **Sửa** từ bản gốc: đổi base image thành published image |
+| `proxy/proxy.mjs` | **Tạo mới**: mã nguồn proxy |
+| `setup.ps1` / `setup.sh` | **Tạo mới**: script tự động hóa |
+
+> **Luồng đúng:** clone repo gốc → copy các file custom đã backup vào `deploy/` → chạy `setup.ps1` (hoặc `setup.sh`). Không chạy script trước khi copy file backup.
 
 ---
 
-## 3. Tạo file .env
+## 3. Chạy script setup
+
+Script tự động làm tất cả: tạo `.env` + sinh token → build images → start services → verify.
+
+### Lần đầu (clone mới)
 
 ```bash
-cp .env.example .env
-```
-
-Sinh token ngẫu nhiên:
-
-```bash
-# Linux/macOS
-openssl rand -hex 32
-
 # Windows (PowerShell)
-# Dùng https://acte.ltd/utils/randomkey hoặc:
-node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+cd open-design/deploy
+.\setup.ps1
+
+# Linux / macOS
+cd open-design/deploy
+chmod +x setup.sh && ./setup.sh
 ```
 
-Sửa file `.env`, đặt giá trị cho `OD_API_TOKEN`:
+### Chạy lại (đã có thư mục, chỉ cần build lại)
 
+```bash
+# Windows
+cd open-design/deploy
+.\setup.ps1 -SkipClone
+
+# Linux / macOS
+cd open-design/deploy
+./setup.sh
 ```
-OD_API_TOKEN=ec6a6a779f191034b1e3f2f610b51995797569b86a3c084a02b61f0821fc0a7
-```
+
+### Script làm gì?
+
+| Bước | Mô tả |
+|------|-------|
+| 1. Kiểm tra | Docker + Docker Compose đã cài chưa |
+| 2. Clone | `git clone` nếu chưa có thư mục (bỏ qua nếu dùng `-SkipClone`) |
+| 3. `.env` | Copy từ `.env.example`, sinh `OD_API_TOKEN` ngẫu nhiên |
+| 4. Build | `docker compose build` — build 3 images |
+| 5. Start | `docker compose up -d` — khởi động container |
+| 6. Chờ | Poll đến khi daemon healthy (tối đa 60s) |
+| 7. Verify | Gọi `/api/health` và `/api/version` |
+| 8. In kết quả | Web UI URL, token, hướng dẫn dùng OpenCode |
+
+### Một số lưu ý
+
+- Lần build đầu tiên có thể mất vài phút (tải base image ~400MB + opencode binary ~150MB). Các lần sau dùng cache.
+- Nếu script thất bại ở bước build, kiểm tra kết nối mạng và Docker disk space.
+- Nếu daemon không healthy sau 60s, chạy `docker compose logs open-design` để xem lỗi.
+- Token được in ra màn hình sau khi chạy xong. Lưu lại nếu cần dùng sau.
 
 ---
 
-## 4. Build images
-
-```bash
-cd deploy
-docker compose build
-```
-
-Lần đầu có thể mất vài phút (tải base image ~400MB + opencode ~150MB). Các lần sau dùng cache.
-
----
-
-## 5. Khởi động
-
-```bash
-docker compose up -d
-```
-
-Kiểm tra trạng thái:
-
-```bash
-docker compose ps
-```
-
-Kết quả mong đợi:
-
-```
-NAME                IMAGE               STATUS                    PORTS
-open-design         open-design:local   Up (healthy)              7456/tcp
-open-design-proxy   open-design-proxy   Up                        127.0.0.1:7456->7456/tcp
-open-design-tools   open-design-tools   Up
-```
-
-## 6. Kiểm tra hoạt động
+## 4. Kiểm tra hoạt động (thủ công)
 
 ### API health
 
@@ -136,7 +145,7 @@ Kiểm tra:
 
 ---
 
-## 7. Sử dụng OpenCode CLI
+## 5. Sử dụng OpenCode CLI
 
 Chạy lệnh OpenCode bên trong tools container:
 
@@ -161,40 +170,61 @@ docker compose exec tools od plugin list
 
 ---
 
-## 8. Sao lưu và triển khai trên máy khác
+## 6. Sao lưu và triển khai trên máy khác
 
-### File cần copy
-
-Chỉ cần copy thư mục `deploy/` (loại bỏ file tạm):
+### File cần backup
 
 ```
 deploy/
-├── docker-compose.yml
-├── Dockerfile.daemon
-├── Dockerfile.proxy
-├── Dockerfile.tools
+├── docker-compose.yml          # Đã sửa
+├── Dockerfile.daemon           # File mới
+├── Dockerfile.proxy            # File mới
+├── Dockerfile.tools            # Đã sửa
 ├── proxy/
-│   └── proxy.mjs
-├── .env          (hoặc .env.example + tự tạo token)
+│   └── proxy.mjs               # File mới
+├── setup.ps1                   # File mới
+├── setup.sh                    # File mới
+├── SETUP_OPENDESIGN_OPENCODE.md # File mới
+├── .env                        (token riêng — backup riêng, không public)
 └── .env.example
 ```
 
-### Trên máy mới
+### Trên máy mới — đúng 3 bước
 
 ```bash
-git clone <repo-url> open-design
+# Bước 1: Clone repo gốc
+git clone https://github.com/nexu-io/open-design.git
 cd open-design/deploy
-cp .env.example .env
-# Sửa .env với token mới
-docker compose build
-docker compose up -d
+
+# Bước 2: Copy các file custom từ bản backup vào thư mục deploy/
+# (chép docker-compose.yml, Dockerfile.*, proxy/, setup.* từ backup vào đây)
+cp /path/to/backup/docker-compose.yml .
+cp /path/to/backup/Dockerfile.daemon .
+cp /path/to/backup/Dockerfile.proxy .
+cp /path/to/backup/Dockerfile.tools .
+cp -r /path/to/backup/proxy/ .
+cp /path/to/backup/setup.ps1 .
+cp /path/to/backup/setup.sh .
+
+# Bước 3: Chạy script setup (tự động tạo .env, sinh token, build, start)
+.\setup.ps1
 ```
 
-Không cần cài đặt gì thêm (Node.js, pnpm, opencode) — mọi thứ đều ở trong Docker image.
+Hoặc nếu có file `.env` đã backup:
+
+```bash
+# Sau bước 2, copy luôn .env
+cp /path/to/backup/.env .
+
+# Chạy script (bỏ qua clone và tạo .env)
+.\setup.ps1 -SkipClone
+```
+
+Không cần cài Node.js, pnpm, opencode — mọi thứ ở trong Docker image.
 
 ---
 
-## 9. Cập nhật phiên bản Open Design mới
+## 7. Cập nhật phiên bản Open Design mới
 
 Khi image `vanjayak/open-design:latest` được publish bản mới:
 
@@ -212,7 +242,7 @@ Giải thích:
 
 ---
 
-## 10. Xử lý sự cố thường gặp
+## 8. Xử lý sự cố thường gặp
 
 ### Daemon không healthy (SQLITE_READONLY)
 
@@ -264,7 +294,7 @@ docker compose exec open-design ls -la /usr/local/bin/opencode-cli
 
 ---
 
-## 11. Cấu hình tùy chọn
+## 9. Cấu hình tùy chọn
 
 ### Thay đổi cổng
 

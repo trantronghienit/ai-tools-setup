@@ -1,0 +1,24 @@
+FROM docker.io/vanjayak/open-design:latest AS daemon
+
+FROM node:24-alpine
+
+RUN apk add --no-cache tini git curl && \
+    addgroup -S -g 1001 open-design && \
+    adduser -S -D -H -u 1001 -G open-design open-design
+
+COPY --from=daemon --chown=open-design:open-design /app/apps/daemon /app/apps/daemon
+
+RUN echo '#!/bin/sh' > /usr/local/bin/od && \
+    echo 'exec node /app/apps/daemon/dist/cli.js "$@"' >> /usr/local/bin/od && \
+    chmod +x /usr/local/bin/od
+
+RUN curl -fsSL https://opencode.ai/install | SHELL=/bin/sh sh && \
+    cp /root/.opencode/bin/opencode /usr/local/bin/opencode
+
+ENV OD_DAEMON_URL=http://open-design:7456
+ENV OD_API_TOKEN=
+
+USER open-design
+WORKDIR /home/open-design
+ENTRYPOINT ["/sbin/tini", "--"]
+CMD ["sleep", "infinity"]

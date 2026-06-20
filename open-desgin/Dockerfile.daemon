@@ -1,0 +1,13 @@
+FROM docker.io/vanjayak/open-design:latest
+
+USER root
+
+COPY --from=open-design-tools:latest /usr/local/bin/opencode /usr/local/bin/opencode
+RUN ln -sf /usr/local/bin/opencode /usr/local/bin/opencode-cli
+
+# od CLI wrapper for the daemon's own CLI
+RUN echo '#!/bin/sh' > /usr/local/bin/od && \
+    echo 'exec node /app/apps/daemon/dist/cli.js "\$@"' >> /usr/local/bin/od && \
+    chmod +x /usr/local/bin/od
+
+USER open-design
